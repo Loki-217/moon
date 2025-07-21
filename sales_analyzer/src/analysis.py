@@ -12,15 +12,22 @@ def analyze_data(df):
                - restock_df: Products that need restocking.
                - slow_moving_df: Slow-moving products.
     """
-    # Assuming the columns are named 'product_name', 'barcode', 'stock', 'sales'
-    # These names might need to be adjusted based on the actual file format.
+    # Using column names provided by the user.
+    # '现存数量' for stock, '销售数量' for sales.
 
     # Restock analysis
     restock_threshold = 10
-    restock_df = df[df['stock'] < restock_threshold]
+    # Ensure the column exists before trying to access it
+    if '现存数量' in df.columns:
+        restock_df = df[df['现存数量'] < restock_threshold]
+    else:
+        restock_df = pd.DataFrame() # Return empty dataframe if column not found
 
     # Slow-moving analysis
     slow_moving_threshold = 0
-    slow_moving_df = df[df['sales'] <= slow_moving_threshold]
+    if '销售数量' in df.columns:
+        slow_moving_df = df[df['销售数量'] <= slow_moving_threshold]
+    else:
+        slow_moving_df = pd.DataFrame() # Return empty dataframe if column not found
 
     return restock_df, slow_moving_df
