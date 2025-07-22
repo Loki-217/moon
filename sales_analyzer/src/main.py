@@ -9,20 +9,20 @@ from analysis import analyze_data
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle('Sales Analyzer')
+        self.setWindowTitle('商超销售分析工具')
         self.layout = QVBoxLayout(self)
         self.df = None
 
-        self.btn_open = QPushButton('Open Sales Report')
+        self.btn_open = QPushButton('打开销售报表')
         self.btn_open.clicked.connect(self.open_file)
         self.layout.addWidget(self.btn_open)
 
         self.combo_department = QComboBox()
-        self.combo_department.addItems(["All Departments"])
+        self.combo_department.addItems(["所有部门"])
         self.combo_department.currentTextChanged.connect(self.on_department_change)
         self.layout.addWidget(self.combo_department)
 
-        self.label = QLabel('Please open a sales report file (CSV or Excel).')
+        self.label = QLabel('请先打开一个销售报表文件 (CSV 或 Excel格式)。')
         self.layout.addWidget(self.label)
 
         self.tabs = QTabWidget()
@@ -32,16 +32,16 @@ class MainWindow(QWidget):
         self.table_restock = QTableWidget()
         self.table_slow_moving = QTableWidget()
 
-        self.tabs.addTab(self.table_full_data, "Full Report")
-        self.tabs.addTab(self.table_restock, "Restock Needed")
-        self.tabs.addTab(self.table_slow_moving, "Slow-Moving")
+        self.tabs.addTab(self.table_full_data, "完整报表")
+        self.tabs.addTab(self.table_restock, "缺货提醒")
+        self.tabs.addTab(self.table_slow_moving, "滞销商品")
 
     def open_file(self):
         filepath, _ = QFileDialog.getOpenFileName(
             self,
-            "Open Sales Report",
+            "打开销售报表",
             "",
-            "All Files (*);;CSV Files (*.csv);;Excel Files (*.xlsx)"
+            "所有文件 (*);;CSV 文件 (*.csv);;Excel 文件 (*.xlsx)"
         )
         if filepath:
             self.load_data(filepath)
@@ -53,19 +53,19 @@ class MainWindow(QWidget):
             elif filepath.endswith('.xlsx'):
                 df = pd.read_excel(filepath)
             else:
-                self.label.setText("Unsupported file format.")
+                self.label.setText("不支持的文件格式。")
                 return
 
             self.df = df
             self.update_department_dropdown()
             self.run_analysis() # Initial analysis run
-            self.label.setText(f"Loaded and analyzed {filepath}")
+            self.label.setText(f"已成功加载并分析文件: {filepath}")
         except Exception as e:
-            self.label.setText(f"Error loading file: {e}")
+            self.label.setText(f"加载文件时出错: {e}")
 
     def update_department_dropdown(self):
         if self.df is not None and '部门名称' in self.df.columns:
-            departments = ["All Departments"] + self.df['部门名称'].unique().tolist()
+            departments = ["所有部门"] + self.df['部门名称'].unique().tolist()
             self.combo_department.blockSignals(True)
             self.combo_department.clear()
             self.combo_department.addItems(departments)
@@ -79,7 +79,7 @@ class MainWindow(QWidget):
             return
 
         department = self.combo_department.currentText()
-        if department == "All Departments":
+        if department == "所有部门":
             df_to_analyze = self.df
         else:
             df_to_analyze = self.df[self.df['部门名称'] == department]
