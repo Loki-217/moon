@@ -5,6 +5,10 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QLabel, QTabWidget, QComboBox
 )
 from analysis import analyze_data
+from plotting import create_top_sales_chart, create_department_sales_chart
+
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
 
 class MainWindow(QWidget):
     def __init__(self):
@@ -35,6 +39,15 @@ class MainWindow(QWidget):
         self.tabs.addTab(self.table_full_data, "完整报表")
         self.tabs.addTab(self.table_restock, "缺货提醒")
         self.tabs.addTab(self.table_slow_moving, "滞销商品")
+
+        # Setup chart tab
+        self.chart_tab = QWidget()
+        self.chart_layout = QVBoxLayout(self.chart_tab)
+        self.canvas_top_sales = FigureCanvas(Figure(figsize=(10, 6)))
+        self.canvas_dept_sales = FigureCanvas(Figure(figsize=(10, 6)))
+        self.chart_layout.addWidget(self.canvas_top_sales)
+        self.chart_layout.addWidget(self.canvas_dept_sales)
+        self.tabs.addTab(self.chart_tab, "图表分析")
 
     def open_file(self):
         filepath, _ = QFileDialog.getOpenFileName(
@@ -88,6 +101,27 @@ class MainWindow(QWidget):
         restock_df, slow_moving_df = analyze_data(df_to_analyze)
         self.display_data(self.table_restock, restock_df)
         self.display_data(self.table_slow_moving, slow_moving_df)
+
+        self.update_charts(df_to_analyze)
+
+    def update_charts(self, df):
+        department = self.combo_department.currentText()
+
+        # Update top sales chart
+        self.canvas_top_sales.figure.clear()
+        top_sales_fig = create_top_sales_chart(df)
+        self.canvas_top_sales.figure = top_sales_fig
+        self.canvas_top_sales.draw()
+
+        # Update department sales chart visibility
+        if department == "所有部门":
+            self.canvas_dept_sales.figure.clear()
+            dept_sales_fig = create_department_sales_chart(self.df)
+            self.canvas_dept_sales.figure = dept_sales_fig
+            self.canvas_dept_sales.draw()
+            self.canvas_dept_sales.setVisible(True)
+        else:
+            self.canvas_dept_sales.setVisible(False)
 
     def display_data(self, table, df):
         table.setRowCount(df.shape[0])
