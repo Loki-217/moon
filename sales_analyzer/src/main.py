@@ -2,52 +2,77 @@ import sys
 import pandas as pd
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QPushButton, QFileDialog,
-    QTableWidget, QTableWidgetItem, QLabel, QTabWidget, QComboBox
+    QTableWidget, QTableWidgetItem, QLabel, QTabWidget, QListWidget,
+    QHBoxLayout, QScrollArea
 )
-from analysis import analyze_data
+from analysis import generate_order_suggestions, get_restock_summary
 from plotting import create_top_sales_chart, create_department_sales_chart
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from PyQt6.QtGui import QColor
 from matplotlib.figure import Figure
 
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle('商超销售分析工具')
-        self.layout = QVBoxLayout(self)
+        self.setWindowTitle('智能采购订单助手')
+        self.setGeometry(100, 100, 1200, 800) # Set a larger default window size
         self.df = None
 
-        self.btn_open = QPushButton('打开销售报表')
-        self.btn_open.clicked.connect(self.open_file)
-        self.layout.addWidget(self.btn_open)
+        # Main layout
+        main_layout = QHBoxLayout(self)
 
-        self.combo_department = QComboBox()
-        self.combo_department.addItems(["所有部门"])
-        self.combo_department.currentTextChanged.connect(self.on_department_change)
-        self.layout.addWidget(self.combo_department)
+        # Left panel for supplier list
+        left_panel = QVBoxLayout()
+        self.supplier_list = QListWidget()
+        left_panel.addWidget(QLabel("供应商列表"))
+        left_panel.addWidget(self.supplier_list)
 
-        self.label = QLabel('请先打开一个销售报表文件 (CSV 或 Excel格式)。')
-        self.layout.addWidget(self.label)
-
+        # Right panel for tabs
+        right_panel = QVBoxLayout()
         self.tabs = QTabWidget()
-        self.layout.addWidget(self.tabs)
+        right_panel.addWidget(self.tabs)
 
-        self.table_full_data = QTableWidget()
-        self.table_restock = QTableWidget()
-        self.table_slow_moving = QTableWidget()
+        # Add panels to main layout
+        main_layout.addLayout(left_panel, 1) # 1 part width
+        main_layout.addLayout(right_panel, 4) # 4 parts width
 
-        self.tabs.addTab(self.table_full_data, "完整报表")
-        self.tabs.addTab(self.table_restock, "缺货提醒")
-        self.tabs.addTab(self.table_slow_moving, "滞销商品")
+        # Create tabs and their layouts
+        self.order_detail_tab = QWidget()
+        self.order_detail_layout = QVBoxLayout(self.order_detail_tab)
+        self.order_detail_table = QTableWidget()
+        self.order_detail_layout.addWidget(self.order_detail_table)
 
-        # Setup chart tab
-        self.chart_tab = QWidget()
-        self.chart_layout = QVBoxLayout(self.chart_tab)
-        self.canvas_top_sales = FigureCanvas(Figure(figsize=(10, 6)))
-        self.canvas_dept_sales = FigureCanvas(Figure(figsize=(10, 6)))
+        self.restock_summary_tab = QWidget()
+        self.restock_summary_layout = QVBoxLayout(self.restock_summary_tab)
+        self.restock_summary_table = QTableWidget()
+        self.restock_summary_layout.addWidget(self.restock_summary_table)
+
+        # Chart tab setup with scroll area
+        self.chart_tab = QScrollArea()
+        self.chart_tab.setWidgetResizable(True)
+        chart_container = QWidget()
+        self.chart_layout = QVBoxLayout(chart_container)
+        self.canvas_top_sales = FigureCanvas(Figure(figsize=(10, 8)))
+        self.canvas_dept_sales = FigureCanvas(Figure(figsize=(10, 8)))
         self.chart_layout.addWidget(self.canvas_top_sales)
         self.chart_layout.addWidget(self.canvas_dept_sales)
+        self.chart_tab.setWidget(chart_container)
+
+        self.tabs.addTab(self.order_detail_tab, "订单详情")
+        self.tabs.addTab(self.restock_summary_tab, "缺货商品汇总")
         self.tabs.addTab(self.chart_tab, "图表分析")
+
+        # Add buttons to the left panel
+        self.btn_open = QPushButton('打开总销售报表')
+        self.btn_open.clicked.connect(self.open_file)
+        self.btn_export = QPushButton('导出当前订单')
+        self.btn_export.clicked.connect(self.export_order)
+        left_panel.addWidget(self.btn_open)
+        left_panel.addWidget(self.btn_export)
+
+        # Connect supplier list signal
+        self.supplier_list.currentItemChanged.connect(self.on_supplier_change)
 
     def open_file(self):
         filepath, _ = QFileDialog.getOpenFileName(
@@ -66,46 +91,104 @@ class MainWindow(QWidget):
             elif filepath.endswith('.xlsx'):
                 df = pd.read_excel(filepath)
             else:
-                self.label.setText("不支持的文件格式。")
+                # This label doesn't exist anymore, we can show a message box later if needed.
+                print("Unsupported file format.")
                 return
 
             self.df = df
-            self.update_department_dropdown()
-            self.run_analysis() # Initial analysis run
-            self.label.setText(f"已成功加载并分析文件: {filepath}")
+            self.update_supplier_list()
+            # After loading, automatically select the first supplier if list is not empty
+            if self.supplier_list.count() > 0:
+                self.supplier_list.setCurrentRow(0)
+
         except Exception as e:
-            self.label.setText(f"加载文件时出错: {e}")
+            print(f"Error loading file: {e}")
 
-    def update_department_dropdown(self):
-        if self.df is not None and '部门名称' in self.df.columns:
-            departments = ["所有部门"] + self.df['部门名称'].unique().tolist()
-            self.combo_department.blockSignals(True)
-            self.combo_department.clear()
-            self.combo_department.addItems(departments)
-            self.combo_department.blockSignals(False)
+    def update_supplier_list(self):
+        self.supplier_list.clear()
+        if self.df is not None and '供应商' in self.df.columns:
+            # Add an item for "All Suppliers"
+            self.supplier_list.addItem("所有供应商")
+            suppliers = self.df['供应商'].unique().tolist()
+            self.supplier_list.addItems(sorted(suppliers))
 
-    def on_department_change(self, text):
-        self.run_analysis()
+    def on_supplier_change(self, current, previous):
+        if current is None:
+            return
 
-    def run_analysis(self):
+        supplier = current.text()
+
         if self.df is None:
             return
 
-        department = self.combo_department.currentText()
-        if department == "所有部门":
+        if supplier == "所有供应商":
             df_to_analyze = self.df
         else:
-            df_to_analyze = self.df[self.df['部门名称'] == department]
+            df_to_analyze = self.df[self.df['供应商'] == supplier]
 
-        self.display_data(self.table_full_data, df_to_analyze)
-        restock_df, slow_moving_df = analyze_data(df_to_analyze)
-        self.display_data(self.table_restock, restock_df)
-        self.display_data(self.table_slow_moving, slow_moving_df)
+        # This is where we will call functions to update tables and charts
+        self.update_order_details(df_to_analyze)
 
-        self.update_charts(df_to_analyze)
+    def export_order(self):
+        if self.order_detail_table.rowCount() == 0:
+            print("No data to export.")
+            # Optionally, show a message box to the user
+            return
+
+        current_supplier = self.supplier_list.currentItem()
+        if not current_supplier or current_supplier.text() == "所有供应商":
+            print("Please select a specific supplier to export.")
+            return
+
+        supplier_name = current_supplier.text()
+        from datetime import datetime
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        filename = f"{supplier_name}-采购订单-{date_str}.xlsx"
+
+        filepath, _ = QFileDialog.getSaveFileName(self, "保存订单", filename, "Excel Files (*.xlsx)")
+
+        if not filepath:
+            return
+
+        # Re-generate the suggested dataframe for export to ensure it's clean
+        df_to_export = self.df[self.df['供应商'] == supplier_name]
+        suggested_df = generate_order_suggestions(df_to_export)
+
+        # Select and reorder columns for the final report
+        export_columns = [
+            '主条码', '商品名称', '单位', '现存数量', '销售数量',
+            '建议订货量', '标准售价', '供应商', '部门名称'
+        ]
+        # Filter columns that are actually present in the dataframe
+        final_columns = [col for col in export_columns if col in suggested_df.columns]
+
+        try:
+            suggested_df[final_columns].to_excel(filepath, index=False)
+            print(f"Order exported successfully to {filepath}")
+        except Exception as e:
+            print(f"Error exporting file: {e}")
+
+
+    def update_order_details(self, df):
+        if df is None:
+            return
+
+        # Generate suggestions
+        suggested_df = generate_order_suggestions(df)
+
+        # Update the order detail table
+        self.display_data(self.order_detail_table, suggested_df)
+
+        # Update the restock summary table
+        restock_summary_df = get_restock_summary(suggested_df)
+        self.display_data(self.restock_summary_table, restock_summary_df)
+
+        # Update charts
+        self.update_charts(suggested_df)
 
     def update_charts(self, df):
-        department = self.combo_department.currentText()
+        # This function now needs to be adapted to the new UI logic
+        # For now, let's just update the top sales chart for the selected supplier/all
 
         # Update top sales chart
         self.canvas_top_sales.figure.clear()
@@ -113,15 +196,23 @@ class MainWindow(QWidget):
         self.canvas_top_sales.figure = top_sales_fig
         self.canvas_top_sales.draw()
 
-        # Update department sales chart visibility
-        if department == "所有部门":
+        current_supplier = self.supplier_list.currentItem().text() if self.supplier_list.currentItem() else ""
+
+        # Update department sales chart visibility and content
+        if current_supplier == "所有供应商":
             self.canvas_dept_sales.figure.clear()
+            # We can still show sales by department for all suppliers
             dept_sales_fig = create_department_sales_chart(self.df)
             self.canvas_dept_sales.figure = dept_sales_fig
             self.canvas_dept_sales.draw()
             self.canvas_dept_sales.setVisible(True)
         else:
-            self.canvas_dept_sales.setVisible(False)
+            # Or, for a specific supplier, show sales by department for that supplier's products
+            self.canvas_dept_sales.figure.clear()
+            dept_sales_fig = create_department_sales_chart(df)
+            self.canvas_dept_sales.figure = dept_sales_fig
+            self.canvas_dept_sales.draw()
+            self.canvas_dept_sales.setVisible(True) # Always visible now, content changes
 
     def display_data(self, table, df):
         table.setRowCount(df.shape[0])
@@ -130,7 +221,11 @@ class MainWindow(QWidget):
 
         for i in range(df.shape[0]):
             for j in range(df.shape[1]):
-                table.setItem(i, j, QTableWidgetItem(str(df.iat[i, j])))
+                item = QTableWidgetItem(str(df.iat[i, j]))
+                # Highlight rows that need restocking
+                if '状态' in df.columns and df.iat[i, df.columns.get_loc('状态')] == '建议补货':
+                    item.setBackground(QColor(255, 224, 224)) # Light red
+                table.setItem(i, j, item)
 
 def main():
     app = QApplication(sys.argv)

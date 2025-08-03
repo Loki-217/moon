@@ -1,33 +1,50 @@
 import pandas as pd
 
-def analyze_data(df):
+def generate_order_suggestions(df):
     """
-    Analyzes the sales data to identify products that need restocking and those that are slow-moving.
+    Generates order suggestions based on sales data.
+    Adds '建议订货量' and '状态' columns.
 
     Args:
-        df (pd.DataFrame): The sales data.
+        df (pd.DataFrame): The sales data for a specific supplier.
 
     Returns:
-        tuple: A tuple containing two DataFrames:
-               - restock_df: Products that need restocking.
-               - slow_moving_df: Slow-moving products.
+        pd.DataFrame: The dataframe with added suggestion columns.
     """
-    # Using column names provided by the user.
-    # '现存数量' for stock, '销售数量' for sales.
+    if df is None or df.empty:
+        return pd.DataFrame()
 
-    # Restock analysis
-    restock_threshold = 10
-    # Ensure the column exists before trying to access it
-    if '现存数量' in df.columns:
-        restock_df = df[df['现存数量'] < restock_threshold]
+    # Make a copy to avoid SettingWithCopyWarning
+    suggested_df = df.copy()
+
+    # Calculate '建议订货量'
+    if '销售数量' in suggested_df.columns:
+        suggested_df['建议订货量'] = suggested_df['销售数量']
     else:
-        restock_df = pd.DataFrame() # Return empty dataframe if column not found
+        suggested_df['建议订货量'] = 0 # Default to 0 if no sales data
 
-    # Slow-moving analysis
-    slow_moving_threshold = 0
-    if '销售数量' in df.columns:
-        slow_moving_df = df[df['销售数量'] <= slow_moving_threshold]
+    # Determine '状态'
+    if '现存数量' in suggested_df.columns and '销售数量' in suggested_df.columns:
+        suggested_df['状态'] = suggested_df.apply(
+            lambda row: '建议补货' if row['现存数量'] < row['销售数量'] else '',
+            axis=1
+        )
     else:
-        slow_moving_df = pd.DataFrame() # Return empty dataframe if column not found
+        suggested_df['状态'] = ''
 
-    return restock_df, slow_moving_df
+    return suggested_df
+
+def get_restock_summary(df):
+    """
+    Filters the dataframe to get only the rows that need restocking.
+
+    Args:
+        df (pd.DataFrame): The dataframe with suggestion columns.
+
+    Returns:
+        pd.DataFrame: A filtered dataframe containing only items that need restocking.
+    """
+    if df is None or df.empty or '状态' not in df.columns:
+        return pd.DataFrame()
+
+    return df[df['状态'] == '建议补货']
