@@ -13,49 +13,45 @@ from PyQt6.QtGui import QColor
 from matplotlib.figure import Figure
 from PyQt6.QtCore import Qt
 import multiprocessing as mp
-import openpyxl
+import pyexcel
+import os
+import os
+import tempfile
+import pyexcel
+import tempfile
 
 def scan_file_worker(filepath, result_queue):
     """
-    A worker function that uses openpyxl in read-only mode to safely and
-    quickly extract data from a potentially complex Excel file.
+    A worker function that converts the .xlsx file to a temporary .csv file
+    to bypass complex parsing, then reads the clean .csv file.
     """
+    temp_dir = tempfile.gettempdir()
+    temp_csv_path = os.path.join(temp_dir, f"temp_{os.getpid()}.csv")
+
     try:
-        workbook = openpyxl.load_workbook(filepath, read_only=True)
-        sheet = workbook.active
+        # Step 1: Convert .xlsx to .csv, which strips all complex formatting.
+        pyexcel.save_as(file_name=filepath, dest_file_name=temp_csv_path)
 
-        # Find header row
-        header_keywords = ['商品编码', '商品名称', '主条码', '部门名称']
-        header_row_index = -1
-        header_list = []
-        for i, row in enumerate(sheet.iter_rows(min_row=1, max_row=10)):
-            row_values = {str(cell.value) for cell in row}
-            if len(set(header_keywords) & row_values) >= 2:
-                header_row_index = i + 1
-                header_list = [cell.value for cell in row]
-                break
+        # Step 2: Read the clean .csv file.
+        # It's assumed the conversion correctly places the header as the first row.
+        df = pd.read_csv(temp_csv_path)
 
-        if header_row_index == -1:
-            result_queue.put("错误: 无法在文件的前10行中找到有效的表头。")
-            return
-
-        # Extract data rows
-        data_rows = []
-        # iter_rows is 1-based, so we start from the next row
-        for row in sheet.iter_rows(min_row=header_row_index + 1):
-            data_rows.append([cell.value for cell in row])
-
-        # Validate required columns in the found header
+        # Step 3: Validate required columns.
         required_cols = ['最新货商名称', '销售数量', '现存数量', '商品编码', '商品名称']
-        missing_cols = [col for col in required_cols if col not in header_list]
+        missing_cols = [col for col in required_cols if col not in df.columns]
         if missing_cols:
             result_queue.put(f"错误: 文件中缺少以下必需的列: {', '.join(missing_cols)}")
             return
 
-        result_queue.put((header_list, data_rows))
+        # Step 4: Put the successful result in the queue.
+        result_queue.put(df)
 
     except Exception as e:
         result_queue.put(e)
+    finally:
+        # Step 5: Clean up the temporary file.
+        if os.path.exists(temp_csv_path):
+            os.remove(temp_csv_path)
 
 class MainWindow(QWidget):
     def __init__(self):

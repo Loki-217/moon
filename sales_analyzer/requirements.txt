@@ -1,4 +1,5 @@
 pandas
 PyQt6
-openpyxl
 matplotlib
+pyexcel
+pyexcel-xlsx
