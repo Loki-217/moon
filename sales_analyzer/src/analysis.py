@@ -2,8 +2,8 @@ import pandas as pd
 
 def generate_order_suggestions(df):
     """
-    Generates order suggestions based on sales data.
-    Adds '建议订货量' and '状态' columns.
+    Generates order suggestions based on sales data using accurate column names.
+    Adds '建议订货数量' and '状态' columns.
 
     Args:
         df (pd.DataFrame): The sales data for a specific supplier.
@@ -17,20 +17,29 @@ def generate_order_suggestions(df):
     # Make a copy to avoid SettingWithCopyWarning
     suggested_df = df.copy()
 
-    # Calculate '建议订货量'
-    if '销售数量' in suggested_df.columns:
-        suggested_df['建议订货量'] = suggested_df['销售数量']
+    # --- Use accurate column names based on user feedback ---
+    sales_col = '销售数量'
+    stock_col = '现存数量'
+    suggestion_col = '建议订货数量'
+    status_col = '状态'
+
+    # Calculate '建议订货数量'
+    if sales_col in suggested_df.columns:
+        # Ensure sales data is numeric, coercing errors to 0
+        suggested_df[suggestion_col] = pd.to_numeric(suggested_df[sales_col], errors='coerce').fillna(0)
     else:
-        suggested_df['建议订货量'] = 0 # Default to 0 if no sales data
+        suggested_df[suggestion_col] = 0
 
     # Determine '状态'
-    if '现存数量' in suggested_df.columns and '销售数量' in suggested_df.columns:
-        suggested_df['状态'] = suggested_df.apply(
-            lambda row: '建议补货' if row['现存数量'] < row['销售数量'] else '',
-            axis=1
-        )
+    if stock_col in suggested_df.columns and sales_col in suggested_df.columns:
+        # Ensure stock data is numeric
+        stock_numeric = pd.to_numeric(suggested_df[stock_col], errors='coerce').fillna(0)
+        sales_numeric = pd.to_numeric(suggested_df[sales_col], errors='coerce').fillna(0)
+
+        suggested_df[status_col] = '建议补货'
+        suggested_df.loc[stock_numeric >= sales_numeric, status_col] = ''
     else:
-        suggested_df['状态'] = ''
+        suggested_df[status_col] = ''
 
     return suggested_df
 

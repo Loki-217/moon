@@ -9,11 +9,17 @@ def create_top_sales_chart(df, top_n=10):
     """
     Creates a bar chart for top N selling products.
     """
-    if df is None or df.empty or '销售数量' not in df.columns or '商品名称' not in df.columns:
+    sales_col = '销售数量'
+    name_col = '商品名称'
+
+    if df is None or df.empty or sales_col not in df.columns or name_col not in df.columns:
         return Figure() # Return an empty figure if data is invalid
 
+    df_copy = df.copy()
+    df_copy[sales_col] = pd.to_numeric(df_copy[sales_col], errors='coerce').fillna(0)
+
     # Sort by sales and get top N
-    top_df = df.nlargest(top_n, '销售数量')
+    top_df = df_copy.nlargest(top_n, sales_col)
 
     fig = Figure(figsize=(10, 6))
     ax = fig.add_subplot(111)
@@ -35,11 +41,17 @@ def create_department_sales_chart(df):
     """
     Creates a bar chart comparing sales across departments.
     """
-    if df is None or df.empty or '销售数量' not in df.columns or '部门名称' not in df.columns:
+    sales_col = '销售数量'
+    dept_col = '部门名称'
+
+    if df is None or df.empty or sales_col not in df.columns or dept_col not in df.columns:
         return Figure()
 
+    df_copy = df.copy()
+    df_copy[sales_col] = pd.to_numeric(df_copy[sales_col], errors='coerce').fillna(0)
+
     # Group by department and sum sales
-    dept_sales = df.groupby('部门名称')['销售数量'].sum().sort_values(ascending=False)
+    dept_sales = df_copy.groupby(dept_col)[sales_col].sum().sort_values(ascending=False)
 
     fig = Figure(figsize=(10, 6))
     ax = fig.add_subplot(111)
