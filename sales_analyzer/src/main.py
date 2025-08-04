@@ -32,13 +32,31 @@ def find_header_row(filepath, max_rows_to_scan=10):
 
 def scan_file_worker(filepath, result_queue):
     """
-    A worker function to run in a separate process.
-    It calls find_header_row and puts the result into a queue.
+    A worker function to run in a separate process. It handles the entire
+    file loading and validation process to isolate potentially crashing code.
     """
     try:
+        # Step 1: Find the header row
         header_row = find_header_row(filepath)
-        result_queue.put(header_row)
+        if header_row is None:
+            result_queue.put("错误: 无法在文件中找到有效的表头。")
+            return
+
+        # Step 2: Load the full dataframe
+        df = pd.read_excel(filepath, header=header_row)
+
+        # Step 3: Validate required columns
+        required_cols = ['最新货商名称', '销售数量', '现存数量', '商品编码', '商品名称']
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        if missing_cols:
+            result_queue.put(f"错误: 文件中缺少以下必需的列: {', '.join(missing_cols)}")
+            return
+
+        # Step 4: Put the successful result (the dataframe) in the queue
+        result_queue.put(df)
+
     except Exception as e:
+        # Put any other exceptions into the queue
         result_queue.put(e)
 
 class MainWindow(QWidget):
@@ -131,33 +149,19 @@ class MainWindow(QWidget):
 
         try:
             result = result_queue.get_nowait()
-            if isinstance(result, Exception):
+            if isinstance(result, pd.DataFrame):
+                self.df = result
+                self.update_supplier_list()
+                if self.supplier_list.count() > 0:
+                    self.supplier_list.setCurrentRow(0)
+            elif isinstance(result, Exception):
                 raise result
-            header_row_index = result
-        except Exception as e:
-            QMessageBox.critical(self, "错误", f"无法从文件中读取数据: {e}")
-            return
-
-        if header_row_index is None:
-            QMessageBox.warning(self, "警告", "无法在文件中找到有效的表头，请检查文件格式。")
-            return
-
-        try:
-            self.df = pd.read_excel(filepath, header=header_row_index)
-            required_cols = ['最新货商名称', '销售数量', '现存数量', '商品编码', '商品名称']
-            required_cols = ['最新货商名称', '销售数量', '现存数量', '商品编码', '商品名称']
-            missing_cols = [col for col in required_cols if col not in self.df.columns]
-            if missing_cols:
-                print(f"Error: The following required columns are missing: {', '.join(missing_cols)}")
+            else: # It's a string error message
+                QMessageBox.critical(self, "文件加载错误", str(result))
                 self.df = None
-                return
-
-            self.update_supplier_list()
-            if self.supplier_list.count() > 0:
-                self.supplier_list.setCurrentRow(0)
 
         except Exception as e:
-            QMessageBox.critical(self, "错误", f"加载数据时发生未知错误: {e}")
+            QMessageBox.critical(self, "处理文件时发生未知错误", str(e))
             self.df = None
 
     def update_supplier_list(self):
