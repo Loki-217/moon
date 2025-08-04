@@ -13,51 +13,48 @@ from PyQt6.QtGui import QColor
 from matplotlib.figure import Figure
 from PyQt6.QtCore import Qt
 import multiprocessing as mp
-
-def find_header_row(filepath, max_rows_to_scan=10):
-    """
-    Scans the first few rows of an Excel file to find the correct header row.
-    This is a standalone function to be safely called from a subprocess.
-    """
-    try:
-        df_preview = pd.read_excel(filepath, header=None, nrows=max_rows_to_scan)
-        header_keywords = ['商品编码', '商品名称', '主条码', '部门名称']
-        for index, row in df_preview.iterrows():
-            row_values = set(str(v) for v in row.values)
-            if len(set(header_keywords) & row_values) >= 2:
-                return index
-    except Exception as e:
-        # Pass exceptions back to the main process
-        raise e
-    return None
+import openpyxl
 
 def scan_file_worker(filepath, result_queue):
     """
-    A worker function to run in a separate process. It handles the entire
-    file loading and validation process to isolate potentially crashing code.
+    A worker function that uses openpyxl in read-only mode to safely and
+    quickly extract data from a potentially complex Excel file.
     """
     try:
-        # Step 1: Find the header row
-        header_row = find_header_row(filepath)
-        if header_row is None:
-            result_queue.put("错误: 无法在文件中找到有效的表头。")
+        workbook = openpyxl.load_workbook(filepath, read_only=True)
+        sheet = workbook.active
+
+        # Find header row
+        header_keywords = ['商品编码', '商品名称', '主条码', '部门名称']
+        header_row_index = -1
+        header_list = []
+        for i, row in enumerate(sheet.iter_rows(min_row=1, max_row=10)):
+            row_values = {str(cell.value) for cell in row}
+            if len(set(header_keywords) & row_values) >= 2:
+                header_row_index = i + 1
+                header_list = [cell.value for cell in row]
+                break
+
+        if header_row_index == -1:
+            result_queue.put("错误: 无法在文件的前10行中找到有效的表头。")
             return
 
-        # Step 2: Load the full dataframe
-        df = pd.read_excel(filepath, header=header_row)
+        # Extract data rows
+        data_rows = []
+        # iter_rows is 1-based, so we start from the next row
+        for row in sheet.iter_rows(min_row=header_row_index + 1):
+            data_rows.append([cell.value for cell in row])
 
-        # Step 3: Validate required columns
+        # Validate required columns in the found header
         required_cols = ['最新货商名称', '销售数量', '现存数量', '商品编码', '商品名称']
-        missing_cols = [col for col in required_cols if col not in df.columns]
+        missing_cols = [col for col in required_cols if col not in header_list]
         if missing_cols:
             result_queue.put(f"错误: 文件中缺少以下必需的列: {', '.join(missing_cols)}")
             return
 
-        # Step 4: Put the successful result (the dataframe) in the queue
-        result_queue.put(df)
+        result_queue.put((header_list, data_rows))
 
     except Exception as e:
-        # Put any other exceptions into the queue
         result_queue.put(e)
 
 class MainWindow(QWidget):
@@ -182,14 +179,17 @@ class MainWindow(QWidget):
 
         try:
             result = result_queue.get_nowait()
-            if isinstance(result, pd.DataFrame):
-                self.df = result
+            if isinstance(result, tuple) and len(result) == 2:
+                header, data = result
+                # This operation is safe and fast (in-memory)
+                self.df = pd.DataFrame(data, columns=header)
+
                 self.update_supplier_list()
                 if self.supplier_list.count() > 0:
                     self.supplier_list.setCurrentRow(0)
             elif isinstance(result, Exception):
                 raise result
-            else: # It's a string error message
+            else:  # It's a string error message
                 QMessageBox.critical(self, "文件加载错误", str(result))
                 self.df = None
 
