@@ -11,6 +11,7 @@ from plotting import create_top_sales_chart, create_department_sales_chart
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from PyQt6.QtGui import QColor
 from matplotlib.figure import Figure
+from PyQt6.QtCore import Qt
 import multiprocessing as mp
 
 def find_header_row(filepath, max_rows_to_scan=10):
@@ -115,8 +116,11 @@ class MainWindow(QWidget):
         self.btn_open.clicked.connect(self.open_file)
         self.btn_export = QPushButton('导出当前订单')
         self.btn_export.clicked.connect(self.export_order)
+        self.status_label = QLabel("")
         left_panel.addWidget(self.btn_open)
         left_panel.addWidget(self.btn_export)
+        left_panel.addStretch() # Add a stretch to push the status label to the bottom
+        left_panel.addWidget(self.status_label)
 
         # Connect supplier list signal
         self.supplier_list.currentItemChanged.connect(self.on_supplier_change)
@@ -132,15 +136,44 @@ class MainWindow(QWidget):
             self.load_data(filepath)
 
     def load_data(self, filepath):
-        result_queue = mp.Queue()
-        process = mp.Process(target=scan_file_worker, args=(filepath, result_queue))
-        process.start()
-        process.join(timeout=15) # 15-second timeout for the scan
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        self.status_label.setText("正在加载报表，请稍候...")
+        QApplication.processEvents()
 
-        if process.is_alive():
-            process.terminate()
-            process.join()
-            QMessageBox.critical(self, "错误", "文件扫描超时，请检查文件是否过大或已损坏。")
+        try:
+            result_queue = mp.Queue()
+            process = mp.Process(target=scan_file_worker, args=(filepath, result_queue))
+            process.start()
+            process.join(timeout=60)  # Timeout extended to 60 seconds
+
+            if process.is_alive():
+                process.terminate()
+                process.join()
+                QMessageBox.critical(self, "错误", "文件扫描超时，请检查文件是否过大或已损坏。")
+                return
+
+            if process.exitcode != 0:
+                QMessageBox.critical(self, "错误", f"文件解析失败，可能是文件格式不受支持或已损坏。(代码: {process.exitcode})")
+                return
+
+            result = result_queue.get_nowait()
+            if isinstance(result, pd.DataFrame):
+                self.df = result
+                self.update_supplier_list()
+                if self.supplier_list.count() > 0:
+                    self.supplier_list.setCurrentRow(0)
+            elif isinstance(result, Exception):
+                raise result
+            else:  # It's a string error message
+                QMessageBox.critical(self, "文件加载错误", str(result))
+                self.df = None
+
+        except Exception as e:
+            QMessageBox.critical(self, "处理文件时发生未知错误", str(e))
+            self.df = None
+        finally:
+            QApplication.restoreOverrideCursor()
+            self.status_label.setText("")
             return
 
         if process.exitcode != 0:
