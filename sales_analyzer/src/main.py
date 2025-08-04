@@ -3,7 +3,7 @@ import pandas as pd
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QPushButton, QFileDialog,
     QTableWidget, QTableWidgetItem, QLabel, QTabWidget, QListWidget,
-    QHBoxLayout, QScrollArea
+    QHBoxLayout, QScrollArea, QMessageBox
 )
 from analysis import generate_order_suggestions, get_restock_summary
 from plotting import create_top_sales_chart, create_department_sales_chart
@@ -11,6 +11,35 @@ from plotting import create_top_sales_chart, create_department_sales_chart
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from PyQt6.QtGui import QColor
 from matplotlib.figure import Figure
+import multiprocessing as mp
+
+def find_header_row(filepath, max_rows_to_scan=10):
+    """
+    Scans the first few rows of an Excel file to find the correct header row.
+    This is a standalone function to be safely called from a subprocess.
+    """
+    try:
+        df_preview = pd.read_excel(filepath, header=None, nrows=max_rows_to_scan)
+        header_keywords = ['商品编码', '商品名称', '主条码', '部门名称']
+        for index, row in df_preview.iterrows():
+            row_values = set(str(v) for v in row.values)
+            if len(set(header_keywords) & row_values) >= 2:
+                return index
+    except Exception as e:
+        # Pass exceptions back to the main process
+        raise e
+    return None
+
+def scan_file_worker(filepath, result_queue):
+    """
+    A worker function to run in a separate process.
+    It calls find_header_row and puts the result into a queue.
+    """
+    try:
+        header_row = find_header_row(filepath)
+        result_queue.put(header_row)
+    except Exception as e:
+        result_queue.put(e)
 
 class MainWindow(QWidget):
     def __init__(self):
@@ -85,18 +114,37 @@ class MainWindow(QWidget):
             self.load_data(filepath)
 
     def load_data(self, filepath):
+        result_queue = mp.Queue()
+        process = mp.Process(target=scan_file_worker, args=(filepath, result_queue))
+        process.start()
+        process.join(timeout=15) # 15-second timeout for the scan
+
+        if process.is_alive():
+            process.terminate()
+            process.join()
+            QMessageBox.critical(self, "错误", "文件扫描超时，请检查文件是否过大或已损坏。")
+            return
+
+        if process.exitcode != 0:
+            QMessageBox.critical(self, "错误", f"文件解析失败，可能是文件格式不受支持或已损坏。(代码: {process.exitcode})")
+            return
+
         try:
-            # Step 1: Find the header row by inspecting the first few rows
-            header_row_index = self.find_header_row(filepath)
-            if header_row_index is None:
-                print("Error: Could not find the header row. Please check the file format.")
-                # Optionally, show a message box to the user
-                return
+            result = result_queue.get_nowait()
+            if isinstance(result, Exception):
+                raise result
+            header_row_index = result
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"无法从文件中读取数据: {e}")
+            return
 
-            # Step 2: Load the full dataframe using the correct header index
+        if header_row_index is None:
+            QMessageBox.warning(self, "警告", "无法在文件中找到有效的表头，请检查文件格式。")
+            return
+
+        try:
             self.df = pd.read_excel(filepath, header=header_row_index)
-
-            # Step 3: Validate required columns
+            required_cols = ['最新货商名称', '销售数量', '现存数量', '商品编码', '商品名称']
             required_cols = ['最新货商名称', '销售数量', '现存数量', '商品编码', '商品名称']
             missing_cols = [col for col in required_cols if col not in self.df.columns]
             if missing_cols:
@@ -109,30 +157,8 @@ class MainWindow(QWidget):
                 self.supplier_list.setCurrentRow(0)
 
         except Exception as e:
-            print(f"An unexpected error occurred while loading the file: {e}")
+            QMessageBox.critical(self, "错误", f"加载数据时发生未知错误: {e}")
             self.df = None
-
-    def find_header_row(self, filepath, max_rows_to_scan=10):
-        """
-        Scans the first few rows of an Excel file to find the correct header row.
-        The header row is identified by the presence of key column names.
-        """
-        try:
-            # Read the first few rows without assuming a header
-            df_preview = pd.read_excel(filepath, header=None, nrows=max_rows_to_scan)
-
-            # Define keywords to identify the header row
-            header_keywords = ['商品编码', '商品名称', '主条码', '部门名称']
-
-            for index, row in df_preview.iterrows():
-                row_values = set(str(v) for v in row.values)
-                # Check if a significant number of keywords are in the row
-                if len(set(header_keywords) & row_values) >= 2:
-                    return index
-        except Exception as e:
-            print(f"Error while scanning for header row: {e}")
-
-        return None
 
     def update_supplier_list(self):
         self.supplier_list.clear()
@@ -271,4 +297,6 @@ def main():
     sys.exit(app.exec())
 
 if __name__ == '__main__':
+    # Required for multiprocessing to work correctly on some platforms (like Windows)
+    mp.freeze_support()
     main()
