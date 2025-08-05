@@ -17,6 +17,7 @@ import openpyxl
 import tempfile
 import pyexcel
 import tempfile
+import os
 
 def scan_file_worker(filepath, result_queue):
     """
