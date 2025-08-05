@@ -149,9 +149,8 @@ class MainWindow(QWidget):
                 return
 
             result = result_queue.get_nowait()
-            if isinstance(result, tuple) and len(result) == 2:
-                header, data = result
-                self.df = pd.DataFrame(data, columns=header)
+            if isinstance(result, pd.DataFrame):
+                self.df = result
                 self.update_supplier_list()
                 if self.supplier_list.count() > 0:
                     self.supplier_list.setCurrentRow(0)
