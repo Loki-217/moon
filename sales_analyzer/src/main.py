@@ -13,9 +13,7 @@ from PyQt6.QtGui import QColor
 from matplotlib.figure import Figure
 from PyQt6.QtCore import Qt
 import multiprocessing as mp
-import pyexcel
-import os
-import os
+import openpyxl
 import tempfile
 import pyexcel
 import tempfile
@@ -150,8 +148,9 @@ class MainWindow(QWidget):
                 return
 
             result = result_queue.get_nowait()
-            if isinstance(result, pd.DataFrame):
-                self.df = result
+            if isinstance(result, tuple) and len(result) == 2:
+                header, data = result
+                self.df = pd.DataFrame(data, columns=header)
                 self.update_supplier_list()
                 if self.supplier_list.count() > 0:
                     self.supplier_list.setCurrentRow(0)
